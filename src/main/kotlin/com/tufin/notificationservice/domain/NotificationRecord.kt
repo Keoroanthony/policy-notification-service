@@ -5,29 +5,28 @@ import java.time.Instant
 /**
  * Immutable domain record representing a stored DENY notification.
  *
- * Design decisions:
+ * Field model: uses policy-rule-engine's evaluation model (subject/resource/action)
+ * rather than a network-firewall model (sourceIp/destinationIp/port). The
+ * rule engine evaluates abstract policy requests, not raw IP packets, so the
+ * notification contract must match what the engine actually produces.
  *
- * - [receivedAt] uses [Instant] rather than [java.time.LocalDateTime]:
- *   Instant is timezone-agnostic and maps directly to a UTC point in time.
- *   Security audit records must be unambiguous — LocalDateTime carries no
- *   timezone context, creating risk in multi-region deployments.
- *   Consistent with policy-rule-engine which uses Instant in both
- *   Rule.createdAt and EvaluationHistoryEntry.timestamp.
- *
- * - [reason] is non-nullable [String]:
- *   Every DENY notification is an actionable security alert. A null reason
- *   produces an incomplete audit record that operators cannot act on.
- *   Callers must always provide a reason — e.g. "Rule 'Block SSH' matched"
- *   or "No matching rule — default deny". This is intentionally stricter
- *   than EvaluationResponse.matchedRuleName (nullable) because that field
- *   is engine output; reason here targets a human operator reading an alert.
+ * - [subject]        the entity making the request (e.g. "GUEST", "USER")
+ * - [resource]       the resource being accessed (e.g. "/admin/users")
+ * - [action]         the operation attempted (e.g. "READ", "WRITE")
+ * - [matchedRuleId]  nullable — null when the denial is the default (no rule matched)
+ * - [reason]         non-nullable human-readable explanation; every DENY must be
+ *                    explainable. See reason convention in README.
+ * - [receivedAt]     [Instant] (not LocalDateTime): timezone-agnostic UTC point in
+ *                    time, consistent with Rule.createdAt and EvaluationHistoryEntry
+ *                    in policy-rule-engine.
  */
 data class NotificationRecord(
     val id: String,
-    val sourceIp: String,
-    val destinationIp: String,
-    val port: Int,
+    val subject: String,
+    val resource: String,
+    val action: String,
     val decision: String,
+    val matchedRuleId: String?,
     val reason: String,
     val receivedAt: Instant
 )

@@ -2,6 +2,7 @@ package com.tufin.notificationservice.controller
 
 import com.tufin.notificationservice.dto.CreateNotificationRequest
 import com.tufin.notificationservice.dto.NotificationResponse
+import com.tufin.notificationservice.dto.NotificationSummaryResponse
 import com.tufin.notificationservice.service.NotificationService
 import jakarta.validation.Valid
 import org.springframework.http.HttpStatus
@@ -27,4 +28,8 @@ class NotificationController(private val notificationService: NotificationServic
     @GetMapping
     fun getAllNotifications(): ResponseEntity<List<NotificationResponse>> =
         ResponseEntity.ok(notificationService.getAllNotifications())
+
+    @GetMapping("/summary")
+    fun getSummary(): ResponseEntity<NotificationSummaryResponse> =
+        ResponseEntity.ok(notificationService.getSummary())
 }

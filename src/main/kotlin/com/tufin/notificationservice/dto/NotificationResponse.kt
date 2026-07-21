@@ -4,10 +4,11 @@ import java.time.Instant
 
 data class NotificationResponse(
     val id: String,
-    val sourceIp: String,
-    val destinationIp: String,
-    val port: Int,
+    val subject: String,
+    val resource: String,
+    val action: String,
     val decision: String,
+    val matchedRuleId: String?,
     val reason: String,
     val receivedAt: Instant
 )

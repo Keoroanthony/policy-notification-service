@@ -63,62 +63,87 @@ Both services are fully independent — no shared state, no startup dependency b
 ### POST `/api/v1/notifications`
 
 Accepts a DENY decision payload and stores it as a notification record.
+Called automatically by `policy-rule-engine` on every DENY — not intended for direct use.
 
 **Request body**
 ```json
 {
-  "sourceIp": "192.168.1.10",
-  "destinationIp": "10.0.0.5",
-  "port": 22,
+  "subject": "GUEST",
+  "resource": "/admin/users",
+  "action": "READ",
   "decision": "DENY",
-  "reason": "Rule 'Block SSH' matched"
+  "matchedRuleId": "rule-002",
+  "reason": "Rule 'Deny Guests Admin' matched"
 }
 ```
+
+> `matchedRuleId` is nullable — omit or pass `null` when the denial is a default
+> (no rule matched).
 
 **Response `201 Created`**
 ```json
 {
   "id": "3f2a1b4c-...",
-  "sourceIp": "192.168.1.10",
-  "destinationIp": "10.0.0.5",
-  "port": 22,
+  "subject": "GUEST",
+  "resource": "/admin/users",
+  "action": "READ",
   "decision": "DENY",
-  "reason": "Rule 'Block SSH' matched",
+  "matchedRuleId": "rule-002",
+  "reason": "Rule 'Deny Guests Admin' matched",
   "receivedAt": "2026-07-20T12:34:56.789Z"
 }
 ```
 
 **Validation errors `400 Bad Request`**
 
-| Condition                                  | Message                                          |
-|--------------------------------------------|--------------------------------------------------|
-| `sourceIp` is blank or not a valid IPv4    | `sourceIp must be a valid IPv4 address`          |
-| `destinationIp` is blank or not a valid IPv4 | `destinationIp must be a valid IPv4 address`   |
-| `port` outside 1–65535                     | `port must be between 1 and 65535`               |
-| `decision` is not `DENY`                   | `decision must be DENY`                          |
-| `reason` is blank                          | `reason must not be blank`                       |
-| Malformed JSON body                        | `Malformed or missing request body`              |
+| Condition                   | Message                                                          |
+|-----------------------------|------------------------------------------------------------------|
+| `subject` is blank          | `subject must not be blank`                                      |
+| `resource` is blank         | `resource must not be blank`                                     |
+| `action` is blank           | `action must not be blank`                                       |
+| `decision` is not `DENY`    | `decision must be DENY — this service only accepts DENY notifications` |
+| `reason` is blank           | `reason must not be blank`                                       |
+| Malformed JSON body         | `Malformed or missing request body`                              |
 
 ---
 
 ### GET `/api/v1/notifications`
 
-Returns all stored notification records.
+Returns all stored notification records. Returns `[]` when no notifications exist (never 404).
 
 **Response `200 OK`**
 ```json
 [
   {
     "id": "3f2a1b4c-...",
-    "sourceIp": "192.168.1.10",
-    "destinationIp": "10.0.0.5",
-    "port": 22,
+    "subject": "GUEST",
+    "resource": "/admin/users",
+    "action": "READ",
     "decision": "DENY",
-    "reason": "Rule 'Block SSH' matched",
+    "matchedRuleId": "rule-002",
+    "reason": "Rule 'Deny Guests Admin' matched",
     "receivedAt": "2026-07-20T12:34:56.789Z"
   }
 ]
 ```
+
+---
+
+### GET `/api/v1/notifications/summary`
+
+Returns aggregate statistics over all stored notifications.
+
+**Response `200 OK`**
+```json
+{
+  "total": 5,
+  "topSubject": "GUEST"
+}
+```
+
+> `topSubject` is `null` when there are no notifications yet.
+> Tie-breaking: when two subjects share the same DENY count, the one that
+> appears first in insertion order wins.
 
 ---
 
@@ -255,12 +280,41 @@ The AI review raised three points:
 
 ## Notification Data Model
 
-| Field           | Type     | Required | Description                                    |
-|-----------------|----------|----------|------------------------------------------------|
-| `id`            | String   | yes      | UUID generated on receipt                      |
-| `sourceIp`      | String   | yes      | Valid IPv4 address of traffic source           |
-| `destinationIp` | String   | yes      | Valid IPv4 address of traffic destination      |
-| `port`          | Integer  | yes      | Must be 1–65535                                |
-| `decision`      | String   | yes      | Must be `DENY`                                 |
-| `reason`        | String   | yes      | Human-readable denial explanation (non-null)   |
-| `receivedAt`    | Instant  | auto     | UTC timestamp set on receipt (ISO-8601)        |
+| Field           | Type     | Nullable | Description                                                           |
+|-----------------|----------|----------|-----------------------------------------------------------------------|
+| `id`            | String   | no       | UUID generated on receipt                                             |
+| `subject`       | String   | no       | The entity that was denied (e.g. `"GUEST"`, `"USER"`)                |
+| `resource`      | String   | no       | The resource that was requested (e.g. `"/admin/users"`)              |
+| `action`        | String   | no       | The operation attempted (e.g. `"READ"`, `"WRITE"`)                   |
+| `decision`      | String   | no       | Always `"DENY"` — this service rejects any other value               |
+| `matchedRuleId` | String   | yes      | ID of the matching rule; `null` when default deny (no rule matched)  |
+| `reason`        | String   | no       | Human-readable denial explanation — never null (see Design Decision B) |
+| `receivedAt`    | Instant  | auto     | UTC timestamp set server-side on receipt (ISO-8601)                   |
+
+---
+
+## Integration Contract
+
+`policy-rule-engine` calls this service automatically on every DENY using
+`WebClientAuditServiceClient`. The call is **fire-and-forget** (async via WebClient
+`.subscribe()`), which means:
+
+- Notification delivery failures **never** delay or block the DENY response to the caller.
+- If this service is unavailable, the rule engine logs a `WARN` and continues.
+- If this service rejects a request (4xx), the rule engine logs an `ERROR` — this
+  indicates a field-contract mismatch that requires a code fix.
+
+### `reason` convention
+
+The rule engine populates `reason` as follows:
+
+| Scenario                | `reason` value                              |
+|-------------------------|---------------------------------------------|
+| A rule matched          | `"Rule '<ruleName>' matched"`              |
+| No rule matched         | `"No matching rule — default deny"`        |
+
+### Configuration (in `policy-rule-engine`)
+
+```properties
+notification.service.base-url=http://localhost:8081
+```
