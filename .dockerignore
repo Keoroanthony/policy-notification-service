@@ -1,0 +1,25 @@
+# .dockerignore — excludes files from the Docker build context.
+# See policy-rule-engine/.dockerignore for full rationale.
+
+# Git internals
+.git
+.gitattributes
+.gitignore
+
+# IntelliJ project files
+.idea/
+*.iml
+*.iws
+*.ipr
+out/
+
+# Maven build output — must be excluded so local `./mvnw package` output
+# does not conflict with the Docker build or invalidate cache layers.
+target/
+
+# Docker files themselves
+Dockerfile
+.dockerignore
+
+# Documentation
+*.md
