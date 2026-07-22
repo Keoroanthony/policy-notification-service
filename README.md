@@ -5,6 +5,22 @@ stores them as in-memory alert records, providing a queryable notification log f
 
 ---
 
+## System Overview
+
+This service is part of a three-service policy system:
+
+| Service                              | Port   | Technology          | Role                                                           |
+|--------------------------------------|--------|---------------------|----------------------------------------------------------------|
+| `policy-gateway-service`             | 8082   | Kotlin / Maven      | **Public entry point** — proxies evaluation requests           |
+| `policy-rule-engine`                 | 8080   | Java / Gradle       | Evaluates traffic; returns ALLOW or DENY (internal)            |
+| `policy-notification-service` (this) | 8081   | Kotlin / Maven      | Receives DENY decisions; stores alert records (internal)       |
+| PostgreSQL                           | 5432   | postgres:16-alpine  | Reserved for future persistence (currently unused by services) |
+
+> This service is **internal**. It is called automatically by `policy-rule-engine` on every DENY.
+> External clients interact with the system via `policy-gateway-service` on port 8082.
+
+---
+
 ## Prerequisites
 
 | Requirement | Version                      |
@@ -36,9 +52,17 @@ The service starts on **http://localhost:8081** by default.
 
 ---
 
-## Running Both Services Together
+## Running All Services (recommended — Docker)
 
-This service is designed to run alongside `policy-rule-engine` (port 8080).
+From the parent directory (`IdeaProjects/`):
+
+```bash
+docker compose up --build
+```
+
+This starts all four containers in the correct order (postgres → rule-engine + notification-service → gateway).
+
+## Running Services Locally (without Docker)
 
 **Terminal 1 — policy-rule-engine:**
 ```bash
@@ -49,12 +73,18 @@ cd ../tufin
 
 **Terminal 2 — policy-notification-service:**
 ```bash
-cd policy-notification-service
 ./mvnw spring-boot:run
 # → Listening on http://localhost:8081
 ```
 
-Both services are fully independent — no shared state, no startup dependency between them.
+**Terminal 3 — policy-gateway-service:**
+```bash
+cd ../policy-gateway-service
+./mvnw spring-boot:run
+# → Listening on http://localhost:8082
+```
+
+All three services are independently deployable — no shared state, no blocking startup dependency.
 
 ---
 
@@ -290,6 +320,23 @@ The AI review raised three points:
 | `matchedRuleId` | String   | yes      | ID of the matching rule; `null` when default deny (no rule matched)  |
 | `reason`        | String   | no       | Human-readable denial explanation — never null (see Design Decision B) |
 | `receivedAt`    | Instant  | auto     | UTC timestamp set server-side on receipt (ISO-8601)                   |
+
+---
+
+## Docker
+
+A `Dockerfile` is provided using a multi-stage build:
+- **Builder stage** — `eclipse-temurin:21-jdk-jammy` compiles the fat JAR via `./mvnw package`
+- **Runtime stage** — `eclipse-temurin:21-jre-jammy` runs the JAR as a non-root user
+
+### Individual image build (for debugging)
+
+```bash
+# From policy-notification-service/
+docker build -t policy-notification-service .
+```
+
+No environment variables need to be overridden for this service — it only receives inbound calls; it does not call any other service.
 
 ---
 
